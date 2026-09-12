@@ -44,16 +44,29 @@ type HealthCheck struct {
 func (hc *HealthCheck) process() {
 	ticker := time.NewTicker(hc.interval)
 	go hc.check()
+	var deferred bool
 	for {
 		select {
 		case <-ticker.C:
 			lastTouch := hc.lastTouch.Load()
 			since := time.Since(lastTouch)
-			if !hc.lazy || since < hc.interval {
+			switch {
+			case since < hc.interval:
 				hc.check()
-			} else {
+			case hc.lazy:
 				log.Debugln("Skip once health check because we are lazy")
+			case screenOff():
+				deferred = true
+				log.Debugln("Defer health check until the screen comes back")
+			default:
+				hc.check()
 			}
+		case <-screenWake():
+			if !deferred {
+				continue
+			}
+			deferred = false
+			hc.check()
 		case <-hc.ctx.Done():
 			ticker.Stop()
 			return
